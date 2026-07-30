@@ -79,13 +79,12 @@ from google.genai import types
 
 load_dotenv()
 
-# Option A: Unpack single chroma_storage.zip if present
+# Step 1: Handle database decompression on Streamlit Cloud startup
 if not os.path.exists("chroma_storage") and os.path.exists("chroma_storage.zip"):
     st.info("Unpacking vector database index...")
     with zipfile.ZipFile("chroma_storage.zip", "r") as zip_ref:
         zip_ref.extractall(".")
 
-# Option B: Reassemble and unpack split parts from chroma_storage_parts if present
 elif not os.path.exists("chroma_storage") and os.path.exists("chroma_storage_parts"):
     st.info("Reassembling and extracting vector database index... Please wait a moment.")
     parts = sorted(glob.glob("chroma_storage_parts/part_*.bin"))
@@ -112,7 +111,7 @@ def load_assets():
     embed_model = SentenceTransformer("all-MiniLM-L6-v2")
     chroma_client = chromadb.PersistentClient(path="chroma_storage")
     
-    # Safely get or create the collection
+    # Safely load the existing collection
     collection = chroma_client.get_or_create_collection(name="global_movies_recommender")
     return ai_client, embed_model, collection
 
@@ -127,21 +126,26 @@ if st.button("Find Matches"):
     if user_query.strip() != "":
         with st.spinner("Searching database catalog..."):
             
-            # Phase 1: Vector Database Query
+            # Vector Database Query
             query_vector = embed_model.encode([user_query]).tolist()
             search_results = collection.query(query_embeddings=query_vector, n_results=4)
             
             context_block = ""
             
             # Verify if records were retrieved
-            if search_results and search_results['ids'] and len(search_results['ids'][0]) > 0:
+            if search_results and search_results.get('ids') and len(search_results['ids'][0]) > 0:
                 for idx in range(len(search_results['ids'][0])):
-                    title = search_results['metadatas'][0][idx]['title']
-                    rating = search_results['metadatas'][0][idx]['vote_average']
+                    metadata = search_results['metadatas'][0][idx]
+                    
+                    # Safe metadata retrieval to prevent KeyError crashes
+                    title = metadata.get('title', 'Unknown Title')
+                    rating = metadata.get('vote_average', metadata.get('rating', 'N/A'))
+                    streaming_info = metadata.get('streaming_info', 'Available on major streaming platforms')
                     overview = search_results['documents'][0][idx]
                     
                     context_block += f"Movie Title: {title}\n"
                     context_block += f"Database Rating: {rating} / 10\n"
+                    context_block += f"Streaming Platform Info: {streaming_info}\n"
                     context_block += f"Plot Summary: {overview}\n"
                     context_block += "-------------------\n\n"
                 
@@ -151,12 +155,13 @@ if st.button("Find Matches"):
                     "1. Create a clean Markdown header using '###' and the movie name.\n"
                     "2. Provide a bold sub-headline indicating its rating, e.g., '**Rating:** [Insert Rating Value] / 10'.\n"
                     "3. Provide a compelling 2-sentence explanation of why it fits the user's vibe query.\n"
-                    "4. Create a dedicated bold line called '**Where to Watch:**'. Use your internal knowledge base "
-                    "to list the major streaming platforms where this movie is widely available (e.g., Netflix, Prime Video, Disney+, Apple TV, JioCinema, etc.)."
+                    "4. Create a dedicated bold line called '**Where to Watch:**'. Use the provided Streaming Platform Info "
+                    "or your knowledge base to list where it is available (e.g., Netflix, Prime Video, Disney+, Apple TV, JioCinema, etc.)."
                 )
                 
+                # Fixed model string to valid 'gemini-2.5-flash'
                 response = ai_client.models.generate_content(
-                    model="gemini-3.5-flash-lite",
+                    model="gemini-2.5-flash",
                     contents=f"User Request: {user_query}\n\nRetrieved Matches:\n{context_block}",
                     config=types.GenerateContentConfig(system_instruction=system_instruction)
                 )
@@ -164,4 +169,5 @@ if st.button("Find Matches"):
                 st.success("Top Recommendations Found:")
                 st.markdown(response.text)
             else:
-                st.error("Vector database is empty. Please ensure 'chroma_storage' or 'chroma_storage_parts' is uploaded to GitHub.")
+                st.error("Vector database is empty. Please ensure 'chroma_storage' or 'chroma_storage_parts' is unpacked properly.")
+                
