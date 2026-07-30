@@ -80,25 +80,34 @@ from google.genai import types
 load_dotenv()
 
 # Step 1: Handle database decompression on Streamlit Cloud startup
-if not os.path.exists("chroma_storage") and os.path.exists("chroma_storage.zip"):
-    st.info("Unpacking vector database index...")
-    with zipfile.ZipFile("chroma_storage.zip", "r") as zip_ref:
-        zip_ref.extractall(".")
+import os
+import glob
+import zipfile
+import streamlit as st
 
-elif not os.path.exists("chroma_storage") and os.path.exists("chroma_storage_parts"):
-    st.info("Reassembling and extracting vector database index... Please wait a moment.")
-    parts = sorted(glob.glob("chroma_storage_parts/part_*.bin"))
-    combined_zip = "temp_chroma_storage.zip"
-    
-    with open(combined_zip, "wb") as outfile:
-        for part in parts:
-            with open(part, "rb") as infile:
-                outfile.write(infile.read())
+# Handle database unpacking safely
+if not os.path.exists("chroma_storage"):
+    if os.path.exists("chroma_storage.zip"):
+        st.info("Unpacking vector database index...")
+        with zipfile.ZipFile("chroma_storage.zip", "r") as zip_ref:
+            zip_ref.extractall(".")
+            
+    elif os.path.exists("chroma_storage_parts"):
+        parts = sorted(glob.glob("chroma_storage_parts/part_*.bin"))
+        if parts:
+            st.info("Reassembling vector database index... Please wait.")
+            combined_zip = "temp_chroma_storage.zip"
+            
+            with open(combined_zip, "wb") as outfile:
+                for part in parts:
+                    with open(part, "rb") as infile:
+                        outfile.write(infile.read())
+                        
+            with zipfile.ZipFile(combined_zip, "r") as zip_ref:
+                zip_ref.extractall(".")
                 
-    with zipfile.ZipFile(combined_zip, "r") as zip_ref:
-        zip_ref.extractall(".")
-        
-    os.remove(combined_zip)
+            if os.path.exists(combined_zip):
+                os.remove(combined_zip)
 
 st.set_page_config(page_title="AI Movie Recommender", layout="centered")
 st.title("🎬 Global AI Movie Vibe Recommender")
